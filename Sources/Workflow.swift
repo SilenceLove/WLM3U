@@ -316,7 +316,7 @@ extension Workflow {
                 if self.waitingFiles.count > 0 {
                     downloadNextFile()
                 } else {
-                    allDownloadsDidFinished()
+                    try allDownloadsDidFinished()
                 }
                 
                 return
@@ -355,7 +355,11 @@ extension Workflow {
             if self.waitingFiles.count > 0 {
                 self.downloadNextFile()
             } else {
-                self.allDownloadsDidFinished()
+                do {
+                    try self.allDownloadsDidFinished()
+                } catch {
+                    self.handleCompletion(of: "download", completion: self.downloadCompletion, result: .failure(.downloadFailed(error)))
+                }
             }
         })
         
@@ -395,12 +399,12 @@ extension Workflow {
                                         userInfo: ["url": url, "progress": progress, "completedCount": completedCount])
     }
     
-    private func allDownloadsDidFinished() {
+    private func allDownloadsDidFinished() throws {
         timerFire()
         destroyTimer()
         
         let fileLocalUrl = workflowDir!.appendingPathComponent("file.m3u8")
-        var m3uStr = try! String(contentsOf: fileLocalUrl)
+        var m3uStr = try String(contentsOf: fileLocalUrl)
         let arr = m3uStr.components(separatedBy: "\n")
         var lineArr = [String]()
         for str in arr {
@@ -411,10 +415,15 @@ extension Workflow {
             }
         }
         m3uStr = lineArr.joined(separator: "\n")
-        try! fileManager!.removeItem(at: fileLocalUrl)
-        try! m3uStr.write(to: fileLocalUrl, atomically: true, encoding: .utf8)
-        
-        handleCompletion(of: "download", completion: downloadCompletion, result: .success(tsDir!))
+        if let fileManager = fileManager {
+            try fileManager.removeItem(at: fileLocalUrl)
+            try m3uStr.write(to: fileLocalUrl, atomically: true, encoding: .utf8)
+        }
+        if let tsDir = tsDir {
+            handleCompletion(of: "download", completion: downloadCompletion, result: .success(tsDir))
+        }else {
+            handleCompletion(of: "download", completion: downloadCompletion, result: .failure(.downloadFailed(nil)))
+        }
     }
 }
 
@@ -455,14 +464,14 @@ extension Workflow {
             
             let fileHandle = FileHandle(forUpdatingAtPath: combineFilePath.path)
             defer { fileHandle?.closeFile() }
-            for tsFilePath in tsFilePaths {
-                if self.fileManager?.fileExists(atPath: tsFilePath) ?? false {
-                    let data = try! Data(contentsOf: URL(fileURLWithPath: tsFilePath))
-                    fileHandle?.write(data)
-                }
-            }
             
             do {
+                for tsFilePath in tsFilePaths {
+                    if self.fileManager?.fileExists(atPath: tsFilePath) ?? false {
+                        let data = try Data(contentsOf: URL(fileURLWithPath: tsFilePath))
+                        fileHandle?.write(data)
+                    }
+                }
                 try self.fileManager!.removeItem(at: self.tsDir!)
                 let cacheURL = self.workflowDir!.appendingPathComponent("m3uObj")
                 try self.fileManager!.removeItem(at: cacheURL)
